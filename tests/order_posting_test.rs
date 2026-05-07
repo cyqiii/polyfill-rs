@@ -25,7 +25,7 @@ async fn test_post_order_authentication() {
         .create_or_derive_api_key(None)
         .await
         .expect("Failed to create API key");
-    let client = ClobClient::from_config(ClientConfig {
+    let mut client = ClobClient::from_config(ClientConfig {
         base_url: "https://clob.polymarket.com".to_string(),
         chain: 137,
         private_key: Some(private_key),

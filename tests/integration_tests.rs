@@ -102,7 +102,7 @@ async fn test_real_api_authenticated_order_flow() {
         .create_or_derive_api_key(None)
         .await
         .expect("Failed to create/derive API key");
-    let client = authenticated_client(private_key, api_creds);
+    let mut client = authenticated_client(private_key, api_creds);
     println!("PASS: API credentials set");
 
     // Step 2: Get a valid token_id from active markets

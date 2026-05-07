@@ -27,7 +27,7 @@
 //!     })?;
 //!
 //!     let api_creds = bootstrap.create_or_derive_api_key(None).await?;
-//!     let client = ClobClient::from_config(ClientConfig {
+//!     let mut client = ClobClient::from_config(ClientConfig {
 //!         base_url: "https://clob.polymarket.com".to_string(),
 //!         chain: 137,
 //!         private_key: Some("your_private_key".to_string()),

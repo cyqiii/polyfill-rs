@@ -89,6 +89,10 @@ pub struct ClobClient {
     connection_manager: Option<std::sync::Arc<crate::connection_manager::ConnectionManager>>,
     #[allow(dead_code)]
     buffer_pool: std::sync::Arc<crate::buffer_pool::BufferPool>,
+    /// Cache for resolved `CreateOrderOptions` (tick_size + neg_risk) keyed by token_id.
+    /// These values are immutable per token, so caching avoids repeated GET /tick-size
+    /// and GET /neg-risk HTTP calls on every order placement.
+    order_options_cache: std::collections::HashMap<String, CreateOrderOptions>,
 }
 
 #[derive(Default)]
@@ -153,6 +157,7 @@ impl ClobClient {
             dns_cache,
             connection_manager,
             buffer_pool,
+            order_options_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -910,12 +915,22 @@ impl ClobClient {
         }
     }
 
-    /// Get filled order options
+    /// Get filled order options, with per-token caching.
+    ///
+    /// tick_size and neg_risk are immutable per token, so we cache the resolved
+    /// values after the first network fetch. Subsequent calls for the same
+    /// token_id return the cached result without any HTTP round-trips.
     async fn get_filled_order_options(
-        &self,
+        &mut self,
         token_id: &str,
         options: Option<&CreateOrderOptions>,
     ) -> Result<CreateOrderOptions> {
+        // Fast path: cache hit
+        if let Some(cached) = self.order_options_cache.get(token_id) {
+            return Ok(*cached);
+        }
+
+        // Slow path: fetch from network
         let (tick_size, neg_risk) = match options {
             Some(o) => (o.tick_size, o.neg_risk),
             None => (None, None),
@@ -927,10 +942,15 @@ impl ClobClient {
             None => self.get_neg_risk(token_id).await?,
         };
 
-        Ok(CreateOrderOptions {
+        let result = CreateOrderOptions {
             tick_size: Some(tick_size),
             neg_risk: Some(neg_risk),
-        })
+        };
+
+        self.order_options_cache
+            .insert(token_id.to_string(), result);
+
+        Ok(result)
     }
 
     /// Check if price is in valid range
@@ -947,15 +967,16 @@ impl ClobClient {
 
     /// Create an order
     pub async fn create_order(
-        &self,
+        &mut self,
         order_args: &OrderArgs,
         options: Option<&CreateOrderOptions>,
     ) -> Result<SignedOrderRequest> {
-        let order_builder = self
-            .order_builder
-            .as_ref()
-            .ok_or_else(|| PolyfillError::auth("Order builder not initialized"))?;
+        // Check order_builder exists before any async work.
+        if self.order_builder.is_none() {
+            return Err(PolyfillError::auth("Order builder not initialized"));
+        }
 
+        // Resolve options first (&mut self borrow released after this line).
         let create_order_options = self
             .get_filled_order_options(&order_args.token_id, options)
             .await?;
@@ -973,7 +994,11 @@ impl ClobClient {
             ));
         }
 
-        order_builder.create_order(self.chain_id, &order_args, &create_order_options)
+        // Now safe to borrow order_builder immutably.
+        self.order_builder
+            .as_ref()
+            .expect("checked above")
+            .create_order(self.chain_id, &order_args, &create_order_options)
     }
 
     /// Calculate market price from order book
@@ -1015,14 +1040,13 @@ impl ClobClient {
 
     /// Create a market order
     pub async fn create_market_order(
-        &self,
+        &mut self,
         order_args: &MarketOrderArgs,
         options: Option<&CreateOrderOptions>,
     ) -> Result<SignedOrderRequest> {
-        let order_builder = self
-            .order_builder
-            .as_ref()
-            .ok_or_else(|| PolyfillError::auth("Order builder not initialized"))?;
+        if self.order_builder.is_none() {
+            return Err(PolyfillError::auth("Order builder not initialized"));
+        }
 
         let create_order_options = self
             .get_filled_order_options(&order_args.token_id, options)
@@ -1101,7 +1125,10 @@ impl ClobClient {
             ));
         }
 
-        order_builder.create_market_order(self.chain_id, &order_args, price, &create_order_options)
+        self.order_builder
+            .as_ref()
+            .expect("checked above")
+            .create_market_order(self.chain_id, &order_args, price, &create_order_options)
     }
 
     /// Post an order to the exchange
@@ -1164,7 +1191,7 @@ impl ClobClient {
 
     /// Create and post an order in one call
     pub async fn create_and_post_order(
-        &self,
+        &mut self,
         order_args: &OrderArgs,
         create_options: Option<&CreateOrderOptions>,
         post_options: Option<&PostOrderOptions>,
@@ -1175,7 +1202,7 @@ impl ClobClient {
 
     /// Create and post a market order in one call.
     pub async fn create_and_post_market_order(
-        &self,
+        &mut self,
         order_args: &MarketOrderArgs,
         create_options: Option<&CreateOrderOptions>,
         post_options: Option<&PostOrderOptions>,
