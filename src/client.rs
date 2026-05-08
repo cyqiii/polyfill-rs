@@ -965,6 +965,16 @@ impl ClobClient {
         self.get_clob_market_info(&market.condition_id).await
     }
 
+    /// Pre-fetch and cache tick_size + neg_risk for a token ID.
+    ///
+    /// Call this at market init time so the first `create_order` avoids
+    /// the 2 HTTP round-trips (GET /tick-size, GET /neg-risk). Subsequent
+    /// calls for the same token_id are no-ops (cache hit).
+    pub async fn warm_order_cache(&mut self, token_id: &str) -> Result<()> {
+        self.get_filled_order_options(token_id, None).await?;
+        Ok(())
+    }
+
     /// Create an order
     pub async fn create_order(
         &mut self,
