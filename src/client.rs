@@ -2550,6 +2550,8 @@ mod tests {
             builder: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .to_string(),
             signature: "0xdeadbeef".to_string(),
+            order_hash: "0x1111111111111111111111111111111111111111111111111111111111111111"
+                .to_string(),
         }
     }
 

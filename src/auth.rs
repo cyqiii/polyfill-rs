@@ -8,7 +8,7 @@ use crate::types::ApiCredentials;
 use alloy_primitives::{hex::encode_prefixed, Address, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{eip712_domain, sol};
+use alloy_sol_types::{eip712_domain, sol, SolStruct};
 use base64::engine::Engine;
 use hmac::{Hmac, Mac};
 use serde::Serialize;
@@ -113,7 +113,7 @@ pub fn sign_order_message(
     order: SignedOrderMessage,
     chain_id: u64,
     verifying_contract: Address,
-) -> Result<String> {
+) -> Result<(String, String)> {
     let order = Order {
         salt: order.salt,
         maker: order.maker,
@@ -138,8 +138,12 @@ pub fn sign_order_message(
     let signature = signer
         .sign_typed_data_sync(&order, &domain)
         .map_err(|e| PolyfillError::crypto(format!("Order signature failed: {}", e)))?;
+    let order_hash = order.eip712_signing_hash(&domain);
 
-    Ok(encode_prefixed(signature.as_bytes()))
+    Ok((
+        encode_prefixed(signature.as_bytes()),
+        encode_prefixed(order_hash.as_slice()),
+    ))
 }
 
 /// Build HMAC signature for L2 authentication
@@ -396,6 +400,41 @@ mod tests {
         // EIP-712 signatures should be hex strings of specific length
         assert!(signature.starts_with("0x"));
         assert_eq!(signature.len(), 132); // 0x + 130 hex chars = 132 total
+    }
+
+    #[test]
+    fn test_order_signing_returns_stable_order_hash() {
+        use alloy_primitives::{Address, B256, U256};
+        use alloy_signer_local::PrivateKeySigner;
+
+        let private_key = "0x1234567890123456789012345678901234567890123456789012345678901234";
+        let signer: PrivateKeySigner = private_key.parse().expect("Valid private key");
+        let verifying_contract: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let order = SignedOrderMessage {
+            salt: U256::from(42),
+            maker: "0x1111111111111111111111111111111111111111"
+                .parse()
+                .unwrap(),
+            signer: signer.address(),
+            token_id: U256::from(123456),
+            maker_amount: U256::from(100),
+            taker_amount: U256::from(250),
+            side: 0,
+            signature_type: 0,
+            timestamp: U256::from(1_713_916_800_000_u64),
+            metadata: B256::ZERO,
+            builder: B256::ZERO,
+        };
+
+        let (_sig_a, hash_a) =
+            sign_order_message(&signer, order.clone(), 137, verifying_contract).unwrap();
+        let (_sig_b, hash_b) = sign_order_message(&signer, order, 137, verifying_contract).unwrap();
+
+        assert_eq!(hash_a, hash_b);
+        assert!(hash_a.starts_with("0x"));
+        assert_eq!(hash_a.len(), 66);
     }
 
     #[test]

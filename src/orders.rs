@@ -558,7 +558,7 @@ impl OrderBuilder {
             })?,
         };
 
-        let signature = sign_order_message(&self.signer, order, chain_id, exchange)?;
+        let (signature, order_hash) = sign_order_message(&self.signer, order, chain_id, exchange)?;
 
         Ok(SignedOrderRequest {
             salt: seed,
@@ -574,6 +574,7 @@ impl OrderBuilder {
             metadata,
             builder,
             signature,
+            order_hash,
         })
     }
 }
@@ -720,8 +721,11 @@ mod tests {
         assert!(!object.contains_key("taker"));
         assert!(!object.contains_key("nonce"));
         assert!(!object.contains_key("feeRateBps"));
+        assert!(!object.contains_key("orderHash"));
         assert_eq!(order.builder, BYTES32_ZERO);
         assert_eq!(order.metadata, BYTES32_ZERO);
+        assert!(order.order_hash.starts_with("0x"));
+        assert_eq!(order.order_hash.len(), 66);
     }
 
     #[test]

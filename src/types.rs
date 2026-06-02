@@ -606,6 +606,8 @@ pub struct SignedOrderRequest {
     pub metadata: String,
     pub builder: String,
     pub signature: String,
+    #[serde(skip)]
+    pub order_hash: String,
 }
 
 /// Post order wrapper
